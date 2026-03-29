@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
-// import 'package:http/http.dart' as http; // Uncomment when connecting to your real Flask API
+import 'package:http/http.dart' as http;
+import 'package:fl_chart/fl_chart.dart';
 
 void main() {
   runApp(const MyApp());
@@ -21,7 +22,6 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      // CRITICAL: Always explicitly set initialRoute and map it in routes
       initialRoute: '/',
       routes: {
         '/': (context) => const StatsDashboardScreen(),
@@ -42,6 +42,11 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  // Set this to true when your Flask server is running!
+  // Note: If using Android Emulator, change 127.0.0.1 to 10.0.2.2
+  final bool _useRealApi = false; 
+  final String _apiUrl = 'http://127.0.0.1:5000/stats';
+
   @override
   void initState() {
     super.initState();
@@ -55,40 +60,39 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
     });
 
     try {
-      // --- REAL API CALL EXAMPLE ---
-      // To connect to your local Flask app, you would use the http package:
-      // final response = await http.get(Uri.parse('http://127.0.0.1:5000/stats'));
-      // if (response.statusCode == 200) {
-      //   setState(() {
-      //     _statsData = json.decode(response.body);
-      //     _isLoading = false;
-      //   });
-      // } else {
-      //   throw Exception('Failed to load stats');
-      // }
-      
-      // --- MOCK API CALL FOR PREVIEW ---
-      // Simulating network delay so you can see the loading state
-      await Future.delayed(const Duration(seconds: 1));
-      
-      // Simulating the exact JSON response your Flask app would return
-      final mockJson = '''
-      {
-          "avg_goals_home": 1.85,
-          "avg_goals_away": 1.12,
-          "result_distribution": {
-              "Home Win": 48.5,
-              "Draw": 24.2,
-              "Away Win": 27.3
+      if (_useRealApi) {
+        final response = await http.get(Uri.parse(_apiUrl));
+        if (response.statusCode == 200) {
+          if (mounted) {
+            setState(() {
+              _statsData = json.decode(response.body);
+              _isLoading = false;
+            });
           }
-      }
-      ''';
-      
-      if (mounted) {
-        setState(() {
-          _statsData = json.decode(mockJson);
-          _isLoading = false;
-        });
+        } else {
+          throw Exception('Failed to load stats: HTTP ${response.statusCode}');
+        }
+      } else {
+        // Mock data for preview
+        await Future.delayed(const Duration(seconds: 1));
+        final mockJson = '''
+        {
+            "avg_goals_home": 1.85,
+            "avg_goals_away": 1.12,
+            "result_distribution": {
+                "Home Win": 48.5,
+                "Draw": 24.2,
+                "Away Win": 27.3
+            }
+        }
+        ''';
+        
+        if (mounted) {
+          setState(() {
+            _statsData = json.decode(mockJson);
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -145,8 +149,8 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
       return const Center(child: Text('No data available'));
     }
 
-    final homeGoals = _statsData!['avg_goals_home'] as double;
-    final awayGoals = _statsData!['avg_goals_away'] as double;
+    final homeGoals = (_statsData!['avg_goals_home'] as num).toDouble();
+    final awayGoals = (_statsData!['avg_goals_away'] as num).toDouble();
     final distribution = _statsData!['result_distribution'] as Map<String, dynamic>;
 
     return RefreshIndicator(
@@ -157,6 +161,28 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (!_useRealApi)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Currently showing mock data. Set _useRealApi = true in code to connect to your Flask backend.',
+                        style: TextStyle(color: Colors.deepOrange),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               'Average Goals',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -196,14 +222,41 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
             Card(
               elevation: 2,
               child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: distribution.entries.map((entry) {
-                    return _DistributionRow(
-                      label: entry.key,
-                      percentage: (entry.value as num).toDouble(),
-                    );
-                  }).toList(),
+                padding: const EdgeInsets.all(24.0),
+                child: SizedBox(
+                  height: 200,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: PieChart(
+                          PieChartData(
+                            sectionsSpace: 2,
+                            centerSpaceRadius: 40,
+                            sections: _getPieChartSections(distribution),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: distribution.entries.map((entry) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4.0),
+                              child: _LegendWidget(
+                                label: entry.key,
+                                color: _getColorForLabel(entry.key),
+                                value: (entry.value as num).toDouble(),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -211,6 +264,31 @@ class _StatsDashboardScreenState extends State<StatsDashboardScreen> {
         ),
       ),
     );
+  }
+
+  Color _getColorForLabel(String label) {
+    final lower = label.toLowerCase();
+    if (lower.contains('home')) return Colors.blue;
+    if (lower.contains('away')) return Colors.orange;
+    if (lower.contains('draw')) return Colors.green;
+    return Colors.grey;
+  }
+
+  List<PieChartSectionData> _getPieChartSections(Map<String, dynamic> distribution) {
+    return distribution.entries.map((entry) {
+      final value = (entry.value as num).toDouble();
+      return PieChartSectionData(
+        color: _getColorForLabel(entry.key),
+        value: value,
+        title: '${value.toStringAsFixed(1)}%',
+        radius: 50,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      );
+    }).toList();
   }
 }
 
@@ -258,54 +336,38 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _DistributionRow extends StatelessWidget {
+class _LegendWidget extends StatelessWidget {
   final String label;
-  final double percentage;
+  final Color color;
+  final double value;
 
-  const _DistributionRow({
+  const _LegendWidget({
     required this.label,
-    required this.percentage,
+    required this.color,
+    required this.value,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Determine color based on label for visual flair
-    Color barColor = Colors.grey;
-    if (label.toLowerCase().contains('home')) barColor = Colors.blue;
-    if (label.toLowerCase().contains('away')) barColor = Colors.orange;
-    if (label.toLowerCase().contains('draw')) barColor = Colors.green;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              Text(
-                '${percentage.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey[700],
-                ),
-              ),
-            ],
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
           ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: percentage / 100,
-            backgroundColor: Colors.grey[200],
-            color: barColor,
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(4),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+            overflow: TextOverflow.ellipsis,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
